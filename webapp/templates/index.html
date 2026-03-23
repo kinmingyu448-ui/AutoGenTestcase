@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试用例生成工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- 标题 -->
+        <div class="header">
+            <h1>测试用例生成工具</h1>
+            <p>输入需求文档，AI 自动生成简洁树形测试用例</p>
+        </div>
+
+        <!-- API Key -->
+        <div class="card">
+            <div class="card-title">API 设置</div>
+            <label for="apiKey">Claude API Key</label>
+            <div class="api-key-row">
+                <div class="input-group">
+                    <input type="password" id="apiKey" value="sk-ant-api03-替换为你的真实Key" placeholder="sk-ant-api03-...">
+                </div>
+                <button class="toggle-btn" onclick="toggleApiKey()" title="显示/隐藏">👁</button>
+            </div>
+        </div>
+
+        <!-- 需求输入 -->
+        <div class="card">
+            <div class="card-title">需求文档</div>
+            <label for="requirementText">需求描述（直接粘贴文本）</label>
+            <textarea id="requirementText" placeholder="在此粘贴产品需求文档内容...&#10;&#10;例如：&#10;登录功能验证：&#10;1、用户名长度为8到20个字符&#10;2、密码必须包含大小写字母和数字&#10;3、超过5次错误，锁定10分钟"></textarea>
+
+            <div class="file-upload">
+                <label>或上传需求文件（.docx / .txt）</label>
+                <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('fileInput').click()">
+                    <p id="fileHint">点击选择文件或拖拽到此处</p>
+                    <input type="file" id="fileInput" accept=".docx,.txt" onchange="handleFileSelect(this)">
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 技术文档 -->
+        <div class="card">
+            <div class="card-title">技术文档</div>
+            <label for="techDocText">粘贴技术文档（接口定义、数据库设计、架构说明等）</label>
+            <textarea id="techDocText" placeholder="在此粘贴技术文档内容...&#10;&#10;例如：&#10;接口：POST /api/user/login&#10;请求参数：username(string, 必填), password(string, 必填)&#10;返回：{ code: 0, data: { token: string } }&#10;数据库：user表，username唯一索引，password为bcrypt加密"></textarea>
+
+            <div class="file-upload">
+                <label>或上传技术文档文件（.docx / .txt）</label>
+                <div class="file-upload-area" id="techFileUploadArea" onclick="document.getElementById('techFileInput').click()">
+                    <p id="techFileHint">点击选择文件或拖拽到此处</p>
+                    <input type="file" id="techFileInput" accept=".docx,.txt" onchange="handleTechFileSelect(this)">
+                </div>
+            </div>
+        </div>
+
+        <!-- 设计稿 -->
+        <div class="card">
+            <div class="card-title">设计稿</div>
+            <label for="designDocText">粘贴设计稿描述或上传设计稿图片</label>
+            <textarea id="designDocText" placeholder="在此粘贴设计稿相关描述...&#10;&#10;例如：&#10;登录页面：顶部Logo，中间表单（用户名+密码），底部登录按钮&#10;表单校验：输入框失焦时实时校验，错误时红色边框+提示文字&#10;响应式：移动端表单宽度100%，PC端居中最大400px"></textarea>
+
+            <div class="file-upload">
+                <label>或上传设计稿图片（.png / .jpg）</label>
+                <div class="file-upload-area" id="designFileUploadArea" onclick="document.getElementById('designFileInput').click()">
+                    <p id="designFileHint">点击选择设计稿图片或拖拽到此处（支持多张）</p>
+                    <input type="file" id="designFileInput" accept=".png,.jpg,.jpeg" multiple onchange="handleDesignFileSelect(this)">
+                </div>
+                <div class="design-preview" id="designPreview"></div>
+            </div>
+
+            <button class="btn btn-primary" id="generateBtn" onclick="generate()">
+                生成测试用例
+            </button>
+        </div>
+
+        <!-- 错误提示 -->
+        <div class="error-msg" id="errorMsg"></div>
+
+        <!-- 加载中 -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>AI 正在分析需求并生成测试用例...</p>
+        </div>
+
+        <!-- 输出区 -->
+        <div class="output-section" id="outputSection">
+            <div class="card">
+                <div class="card-title">生成结果</div>
+                <div class="output-actions">
+                    <button class="btn btn-secondary" onclick="copyResult()">复制内容</button>
+                    <button class="btn btn-secondary" onclick="downloadMd()">下载 .md</button>
+                    <button class="btn btn-secondary" onclick="toggleRaw()">查看原文</button>
+                    <button class="btn btn-primary" style="margin-top:0;width:auto;padding:8px 20px;font-size:13px;" onclick="resetForm()">生成新的用例</button>
+                </div>
+                <div class="output-content" id="outputContent"></div>
+                <div class="raw-markdown" id="rawMarkdown">
+                    <pre id="rawText"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let rawMarkdownText = "";
+        let generating = false;
+        let uploadedFileName = "";
+
+        function toggleApiKey() {
+            const input = document.getElementById("apiKey");
+            input.type = input.type === "password" ? "text" : "password";
+        }
+
+        function handleFileSelect(input) {
+            const area = document.getElementById("fileUploadArea");
+            const hint = document.getElementById("fileHint");
+            if (input.files.length > 0) {
+                hint.textContent = input.files[0].name;
+                hint.className = "file-name";
+                area.classList.add("has-file");
+                // 记录上传的需求文档文件名（去掉扩展名）
+                uploadedFileName = input.files[0].name.replace(/\.[^/.]+$/, "");
+            } else {
+                hint.textContent = "点击选择文件或拖拽到此处";
+                hint.className = "";
+                area.classList.remove("has-file");
+                uploadedFileName = "";
+            }
+        }
+
+        function showError(msg) {
+            const el = document.getElementById("errorMsg");
+            el.textContent = msg;
+            el.classList.add("visible");
+            setTimeout(() => el.classList.remove("visible"), 5000);
+        }
+
+        function showToast(msg) {
+            const el = document.getElementById("toast");
+            el.textContent = msg;
+            el.classList.add("show");
+            setTimeout(() => el.classList.remove("show"), 2000);
+        }
+
+        function simpleMarkdown(text) {
+            // 简单 Markdown 渲染
+            let html = "";
+            const lines = text.split("\n");
+            let inUl = false;
+            let ulStack = []; // 追踪缩进层级
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i];
+
+                // 标题
+                if (line.startsWith("### ")) {
+                    if (inUl) { html += closeUlStack(ulStack); ulStack = []; inUl = false; }
+                    html += "<h3>" + escapeHtml(line.slice(4)) + "</h3>";
+                    continue;
+                }
+                if (line.startsWith("## ")) {
+                    if (inUl) { html += closeUlStack(ulStack); ulStack = []; inUl = false; }
+                    html += "<h2>" + escapeHtml(line.slice(3)) + "</h2>";
+                    continue;
+                }
+                if (line.startsWith("# ")) {
+                    if (inUl) { html += closeUlStack(ulStack); ulStack = []; inUl = false; }
+                    html += "<h1>" + escapeHtml(line.slice(2)) + "</h1>";
+                    continue;
+                }
+
+                // 列表项
+                const listMatch = line.match(/^(\s*)- (.*)$/);
+                if (listMatch) {
+                    const indent = listMatch[1].length;
+                    const content = listMatch[2];
+
+                    if (!inUl) {
+                        html += "<ul>";
+                        ulStack.push(indent);
+                        inUl = true;
+                    } else {
+                        const currentIndent = ulStack[ulStack.length - 1];
+                        if (indent > currentIndent) {
+                            html += "<ul>";
+                            ulStack.push(indent);
+                        } else if (indent < currentIndent) {
+                            while (ulStack.length > 1 && ulStack[ulStack.length - 1] > indent) {
+                                html += "</li></ul>";
+                                ulStack.pop();
+                            }
+                            html += "</li>";
+                        } else {
+                            html += "</li>";
+                        }
+                    }
+                    html += "<li>" + escapeHtml(content);
+                    continue;
+                }
+
+                // 空行
+                if (line.trim() === "") {
+                    if (inUl) { html += closeUlStack(ulStack); ulStack = []; inUl = false; }
+                    continue;
+                }
+
+                // 普通文本
+                if (inUl) { html += closeUlStack(ulStack); ulStack = []; inUl = false; }
+                html += "<p>" + escapeHtml(line) + "</p>";
+            }
+
+            if (inUl) { html += closeUlStack(ulStack); }
+            return html;
+        }
+
+        function closeUlStack(stack) {
+            let html = "";
+            for (let i = 0; i < stack.length; i++) {
+                html += "</li></ul>";
+            }
+            return html;
+        }
+
+        function escapeHtml(text) {
+            const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        async function generate() {
+            if (generating) return;
+
+            const apiKey = document.getElementById("apiKey").value.trim();
+            if (!apiKey) { showError("请输入 Claude API Key"); return; }
+
+            const text = document.getElementById("requirementText").value.trim();
+            const fileInput = document.getElementById("fileInput");
+            if (!text && fileInput.files.length === 0) {
+                showError("请输入需求文档内容或上传文件");
+                return;
+            }
+
+            generating = true;
+            rawMarkdownText = "";
+            const btn = document.getElementById("generateBtn");
+            btn.disabled = true;
+            btn.textContent = "生成中...";
+            document.getElementById("loading").classList.add("visible");
+            document.getElementById("outputSection").classList.remove("visible");
+            document.getElementById("errorMsg").classList.remove("visible");
+            document.getElementById("rawMarkdown").classList.remove("visible");
+
+            const techDoc = document.getElementById("techDocText").value.trim();
+            const techFileInput = document.getElementById("techFileInput");
+            const designDoc = document.getElementById("designDocText").value.trim();
+            const designFileInput = document.getElementById("designFileInput");
+
+            const formData = new FormData();
+            formData.append("api_key", apiKey);
+            formData.append("requirement_text", text);
+            formData.append("tech_doc_text", techDoc);
+            formData.append("design_doc_text", designDoc);
+            if (fileInput.files.length > 0) {
+                formData.append("file", fileInput.files[0]);
+            }
+            if (techFileInput.files.length > 0) {
+                formData.append("tech_file", techFileInput.files[0]);
+            }
+            for (let i = 0; i < designFileInput.files.length; i++) {
+                formData.append("design_files", designFileInput.files[i]);
+            }
+
+            try {
+                const response = await fetch("/generate", { method: "POST", body: formData });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    showError(errText);
+                    return;
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                document.getElementById("loading").classList.remove("visible");
+                document.getElementById("outputSection").classList.add("visible");
+                const outputEl = document.getElementById("outputContent");
+                outputEl.innerHTML = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.startsWith("data: ")) continue;
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.error) {
+                                showError(data.error);
+                                return;
+                            }
+                            if (data.text) {
+                                rawMarkdownText += data.text;
+                                outputEl.innerHTML = simpleMarkdown(rawMarkdownText);
+                                outputEl.scrollTop = outputEl.scrollHeight;
+                            }
+                        } catch (e) {}
+                    }
+                }
+
+                document.getElementById("rawText").textContent = rawMarkdownText;
+            } catch (e) {
+                showError("网络错误: " + e.message);
+            } finally {
+                generating = false;
+                btn.disabled = false;
+                btn.textContent = "生成测试用例";
+                document.getElementById("loading").classList.remove("visible");
+            }
+        }
+
+        function copyResult() {
+            if (!rawMarkdownText) { showToast("暂无内容"); return; }
+            navigator.clipboard.writeText(rawMarkdownText).then(() => {
+                showToast("已复制到剪贴板");
+            }).catch(() => {
+                // fallback
+                const ta = document.createElement("textarea");
+                ta.value = rawMarkdownText;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                document.body.removeChild(ta);
+                showToast("已复制到剪贴板");
+            });
+        }
+
+        function downloadMd() {
+            if (!rawMarkdownText) { showToast("暂无内容"); return; }
+            const blob = new Blob([rawMarkdownText], { type: "text/markdown;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = (uploadedFileName || "测试用例") + "_测试用例.md";
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast("下载完成");
+        }
+
+        function toggleRaw() {
+            const el = document.getElementById("rawMarkdown");
+            el.classList.toggle("visible");
+        }
+
+        function resetForm() {
+            // 清空所有文本输入
+            document.getElementById("requirementText").value = "";
+            document.getElementById("techDocText").value = "";
+            document.getElementById("designDocText").value = "";
+
+            // 清空需求文件上传
+            document.getElementById("fileInput").value = "";
+            document.getElementById("fileHint").textContent = "点击选择文件或拖拽到此处";
+            document.getElementById("fileHint").className = "";
+            document.getElementById("fileUploadArea").classList.remove("has-file");
+
+            // 清空技术文档文件上传
+            document.getElementById("techFileInput").value = "";
+            document.getElementById("techFileHint").textContent = "点击选择文件或拖拽到此处";
+            document.getElementById("techFileHint").className = "";
+            document.getElementById("techFileUploadArea").classList.remove("has-file");
+
+            // 清空设计稿文件上传
+            document.getElementById("designFileInput").value = "";
+            document.getElementById("designFileHint").textContent = "点击选择设计稿图片或拖拽到此处（支持多张）";
+            document.getElementById("designFileHint").className = "";
+            document.getElementById("designFileUploadArea").classList.remove("has-file");
+            document.getElementById("designPreview").innerHTML = "";
+            document.getElementById("designPreview").style.display = "none";
+
+            // 隐藏输出区域
+            document.getElementById("outputSection").classList.remove("visible");
+            document.getElementById("rawMarkdown").classList.remove("visible");
+            rawMarkdownText = "";
+            uploadedFileName = "";
+
+            // 滚动到顶部
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            showToast("已清空，可以开始新的用例生成");
+        }
+
+        function handleTechFileSelect(input) {
+            const area = document.getElementById("techFileUploadArea");
+            const hint = document.getElementById("techFileHint");
+            if (input.files.length > 0) {
+                hint.textContent = input.files[0].name;
+                hint.className = "file-name";
+                area.classList.add("has-file");
+            } else {
+                hint.textContent = "点击选择文件或拖拽到此处";
+                hint.className = "";
+                area.classList.remove("has-file");
+            }
+        }
+
+        function handleDesignFileSelect(input) {
+            const area = document.getElementById("designFileUploadArea");
+            const hint = document.getElementById("designFileHint");
+            const preview = document.getElementById("designPreview");
+            if (input.files.length > 0) {
+                const count = input.files.length;
+                const names = Array.from(input.files).map(f => f.name).join(", ");
+                hint.textContent = count + " 张图片: " + names;
+                hint.className = "file-name";
+                area.classList.add("has-file");
+                // 多图预览
+                preview.innerHTML = "";
+                Array.from(input.files).forEach(function(file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = document.createElement("img");
+                        img.src = e.target.result;
+                        img.alt = file.name;
+                        img.title = file.name;
+                        preview.appendChild(img);
+                    };
+                    reader.readAsDataURL(file);
+                });
+                preview.style.display = "flex";
+            } else {
+                hint.textContent = "点击选择设计稿图片或拖拽到此处（支持多张）";
+                hint.className = "";
+                area.classList.remove("has-file");
+                preview.innerHTML = "";
+                preview.style.display = "none";
+            }
+        }
+
+        // 拖拽上传（技术文档）
+        const techUploadArea = document.getElementById("techFileUploadArea");
+        techUploadArea.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            techUploadArea.style.borderColor = "#6c5ce7";
+            techUploadArea.style.background = "#faf9ff";
+        });
+        techUploadArea.addEventListener("dragleave", () => {
+            techUploadArea.style.borderColor = "#d9d9d9";
+            techUploadArea.style.background = "";
+        });
+        techUploadArea.addEventListener("drop", (e) => {
+            e.preventDefault();
+            techUploadArea.style.borderColor = "#d9d9d9";
+            techUploadArea.style.background = "";
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const fileInput = document.getElementById("techFileInput");
+                fileInput.files = files;
+                handleTechFileSelect(fileInput);
+            }
+        });
+
+        // 拖拽上传（设计稿）
+        const designUploadArea = document.getElementById("designFileUploadArea");
+        designUploadArea.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            designUploadArea.style.borderColor = "#6c5ce7";
+            designUploadArea.style.background = "#faf9ff";
+        });
+        designUploadArea.addEventListener("dragleave", () => {
+            designUploadArea.style.borderColor = "#d9d9d9";
+            designUploadArea.style.background = "";
+        });
+        designUploadArea.addEventListener("drop", (e) => {
+            e.preventDefault();
+            designUploadArea.style.borderColor = "#d9d9d9";
+            designUploadArea.style.background = "";
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const fileInput = document.getElementById("designFileInput");
+                fileInput.files = files;
+                handleDesignFileSelect(fileInput);
+            }
+        });
+
+        // 拖拽上传（需求文件）
+        const uploadArea = document.getElementById("fileUploadArea");
+        uploadArea.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = "#6c5ce7";
+            uploadArea.style.background = "#faf9ff";
+        });
+        uploadArea.addEventListener("dragleave", () => {
+            uploadArea.style.borderColor = "#d9d9d9";
+            uploadArea.style.background = "";
+        });
+        uploadArea.addEventListener("drop", (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = "#d9d9d9";
+            uploadArea.style.background = "";
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const fileInput = document.getElementById("fileInput");
+                fileInput.files = files;
+                handleFileSelect(fileInput);
+            }
+        });
+    </script>
+</body>
+</html>
